@@ -87,14 +87,14 @@ if TrialType == 1 % LEFT TRIAL (Plots as Left)
     CorrectLED = {'PWM1', 255}; % Left LED
     RewValve = {'ValveState', 1}; % Left Valve
     RewardTime = LeftValveTime;
-    Stimulus = {'HiFi1', ['P' 1]}; 
+    Stimulus = {'HiFi1', ['P' 0]}; 
 else              % RIGHT TRIAL (Plots as Right)
     CorrectPortIn = 'Port3In';
     ErrorPortIn = 'Port1In';
     CorrectLED = {'PWM3', 255}; % Right LED
     RewValve = {'ValveState', 4}; % Right Valve
     RewardTime = RightValveTime;
-    Stimulus = {'HiFi1', ['P' 0]}; 
+    Stimulus = {'HiFi1', ['P' 1]}; 
 end
 
 sma = NewStateMachine();
