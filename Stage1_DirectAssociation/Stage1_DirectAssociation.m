@@ -49,6 +49,9 @@ H.load(3, errorSound);
 H.push;
 H.AMenvelope = 1/(sf*0.001):1/(sf*0.001):1; 
 
+TotalRewardAmount = 0; % NEW: Initialize total reward counter
+disp(['Total Reward: 0 uL']);
+
 %% Main Trial Loop
 for currentTrial = 1:maxTrials
     S = BpodParameterGUI('sync', S);
@@ -63,9 +66,15 @@ for currentTrial = 1:maxTrials
     SendStateMachine(sma);
     
     RawEvents = RunStateMachine;
-    
     if ~isempty(fieldnames(RawEvents))
         BpodSystem.Data = AddTrialEvents(BpodSystem.Data,RawEvents); 
+        
+        % NEW: Check if animal reached the Reward state this trial
+        if ~isnan(BpodSystem.Data.RawEvents.Trial{currentTrial}.States.Reward(1))
+            TotalRewardAmount = TotalRewardAmount + S.GUI.RewardVolume;
+            disp(['Total Reward: ', num2str(TotalRewardAmount), ' uL']);
+        end
+        
         BpodSystem.Data.TrialSettings(currentTrial) = S; 
         BpodSystem.Data.TrialTypes(currentTrial) = trialTypes(currentTrial); 
         
@@ -73,6 +82,7 @@ for currentTrial = 1:maxTrials
         outcomePlot.update(trialTypes, BpodSystem.Data);
         SaveBpodSessionData;
     end
+
     
     HandlePauseCondition;
     if BpodSystem.Status.BeingUsed == 0; return; end 
@@ -84,14 +94,14 @@ function sma = PrepareStateMachine(S, TrialType, LeftValveTime, RightValveTime)
 if TrialType == 1 % LEFT TRIAL (Plots as Left)
     CorrectPortIn = 'Port1In';
     ErrorPortIn = 'Port3In';
-    CorrectLED = {'PWM1', 255}; % Left LED
+
     RewValve = {'ValveState', 1}; % Left Valve
     RewardTime = LeftValveTime;
     Stimulus = {'HiFi1', ['P' 0]}; 
 else              % RIGHT TRIAL (Plots as Right)
     CorrectPortIn = 'Port3In';
     ErrorPortIn = 'Port1In';
-    CorrectLED = {'PWM3', 255}; % Right LED
+
     RewValve = {'ValveState', 4}; % Right Valve
     RewardTime = RightValveTime;
     Stimulus = {'HiFi1', ['P' 1]}; 
@@ -115,7 +125,7 @@ sma = AddState(sma, 'Name', 'PlayStimulus', ...
 sma = AddState(sma, 'Name', 'WaitForChoice', ...
     'Timer', S.GUI.ResponseTime,...
     'StateChangeConditions', {CorrectPortIn, 'Reward', ErrorPortIn, 'Punish', 'Tup', 'TimeOut'},...
-    'OutputActions', CorrectLED); % ONLY illuminate the correct port to guide them
+    'OutputActions', {'PWM1', 255, 'PWM3', 255}); % ONLY illuminate the correct port to guide them
 
 % 4. Immediate Fixed Reward (No Arduino Handshake)
 sma = AddState(sma, 'Name', 'Reward', ...
