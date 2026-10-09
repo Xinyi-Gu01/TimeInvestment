@@ -79,6 +79,6 @@ function Waveform = GenerateBetaCloud(sf, Duration, Alpha, Beta)
     
     % 5. Normalize to prevent clipping (keep amplitude below 1.0)
     if max(abs(Waveform)) > 0
-        Waveform = (Waveform / max(abs(Waveform))) * 1,0; % Scale to 90%
+        Waveform = (Waveform / max(abs(Waveform))) * 0.9; % Scale to 90%
     end
 end
