@@ -6,7 +6,7 @@ global BpodSystem
 BpodSystem.assertModule('HiFi', 1); 
 H = BpodHiFi(BpodSystem.ModuleUSB.HiFi1); 
 
-%% Define Parameters (UPDATED for Continuous Jitter)
+%% Define Parameters (Continuous Jitter)
 S = BpodSystem.ProtocolSettings; 
 if isempty(fieldnames(S))  
     S.GUI.RewardVolume = 30; % uL
@@ -29,10 +29,10 @@ end
 
 %% Initialize GUI and Data arrays
 maxTrials = 1000;
-BankSize = 20; % Number of unique sounds per side
+BankSize = 9; % FIXED: Reduced to 9 to stay under the 20-slot HiFi limit
 
 trialTypes = ceil(rand(1,maxTrials)*2);
-trialBankIndices = ceil(rand(1,maxTrials) * BankSize); % Randomly select a sound 1-20 for each trial
+trialBankIndices = ceil(rand(1,maxTrials) * BankSize); % Randomly select a sound 1-9 for each trial
 
 BpodSystem.Data.TrialTypes = []; 
 BpodSystem.Data.Custom.AssignedAlpha = NaN(1, maxTrials); % Tracks the specific Alpha used
@@ -55,36 +55,36 @@ MetricsFig = figure('Name', 'Live Session Metrics', 'Position', [100, 100, 1500,
 axRate = subplot(1,5,1); hold(axRate, 'on'); title(axRate, 'Trial Rate'); xlabel(axRate, 'Time (min)'); ylabel(axRate, 'Trials Started');
 axMove = subplot(1,5,2); hold(axMove, 'on'); title(axMove, 'Movement Time'); xlabel(axMove, 'Time (s)'); ylabel(axMove, 'Count');
 axErr = subplot(1,5,3); hold(axErr, 'on'); title(axErr, 'Granular Outcomes'); ylabel(axErr, 'Trial Count');
-set(axErr, 'XTick', 1:4, 'XTickLabel', {'Rew', 'Pun', 'NoDec', 'NoStart'});
+set(axErr, 'XTick', 1:3, 'XTickLabel', {'Rew', 'Pun', 'NoDec'}); % Removed 'NoStart'
 axBias = subplot(1,5,4); hold(axBias, 'on'); title(axBias, 'Side Accuracy (Bias)'); ylabel(axBias, '% Correct');
 set(axBias, 'XTick', 1:2, 'XTickLabel', {'Left', 'Right'}, 'YLim', [0 100]);
-axPsych = subplot(1,5,5); hold(axPsych, 'on'); title(axPsych, 'Accuracy by Alpha'); 
-xlabel(axPsych, 'Alpha Value'); ylabel(axPsych, '% Correct');
-set(axPsych, 'YLim', [0 100], 'XLim', [1 5]);
+axPsych = subplot(1,5,5); hold(axPsych, 'on'); title(axPsych, 'Accuracy by Stimulus Mean'); 
+xlabel(axPsych, 'Distribution Mean (\mu)'); ylabel(axPsych, '% Correct');
+set(axPsych, 'YLim', [0 100], 'XLim', [0 1]);
 
 %% Generate Stimuli Bank (192kHz)
 sf = 192000; 
 H.SamplingRate = sf;
 H.HeadphoneAmpEnabled = false; 
 
-% Pre-calculate the 20 random Alphas for Left and Right
+% Pre-calculate the 9 random Alphas for Left and Right
 LeftAlphas = S.GUI.AlphaLeft_Min + rand(1, BankSize) * (S.GUI.AlphaLeft_Max - S.GUI.AlphaLeft_Min);
 RightAlphas = S.GUI.AlphaRight_Min + rand(1, BankSize) * (S.GUI.AlphaRight_Max - S.GUI.AlphaRight_Min);
 
 disp('Generating audio bank. Please wait...');
-% Generate 20 Unique Left Sounds (Slots 1 to 20)
+% Generate 9 Unique Left Sounds (Slots 1 to 9)
 for i = 1:BankSize
     snd = GenerateBetaCloud(sf, S.GUI.SoundDuration, LeftAlphas(i), S.GUI.BetaLeft);
     H.load(i, snd); 
 end
 
-% Generate 20 Unique Right Sounds (Slots 21 to 40)
+% Generate 9 Unique Right Sounds (Slots 10 to 18)
 for i = 1:BankSize
     snd = GenerateBetaCloud(sf, S.GUI.SoundDuration, RightAlphas(i), S.GUI.BetaRight);
     H.load(i + BankSize, snd); 
 end
 
-% Load Error Sound into Slot 41
+% Load Error Sound into Slot 19
 errorSound = GenerateWhiteNoise(sf, S.GUI.ErrorDelay, 1, 2);
 H.load((BankSize * 2) + 1, errorSound); 
 
@@ -150,7 +150,7 @@ for currentTrial = 1:maxTrials
         
         cla(axErr);
         Outs = BpodSystem.Data.Custom.Outcomes(1:currentTrial);
-        bar(axErr, 1:4, [sum(Outs==1), sum(Outs==2), sum(Outs==3), sum(Outs==4)], 'FaceColor', [0.5 0.5 0.5]);
+        bar(axErr, 1:3, [sum(Outs==1), sum(Outs==2), sum(Outs==3)], 'FaceColor', [0.5 0.5 0.5]);
         
         cla(axBias);
         LeftTrials = find(trialTypes(1:currentTrial) == 1 & ~isnan(BpodSystem.Data.Custom.ChoiceLeft(1:currentTrial)));
@@ -162,32 +162,51 @@ for currentTrial = 1:maxTrials
         bar(axBias, 1, LeftAcc, 'FaceColor', PokeColors.L);
         bar(axBias, 2, RightAcc, 'FaceColor', PokeColors.R);
 
-        % Live Psychometric Curve (Binned by Alpha)
+       % 5. Live Psychometric Curve (Binned by True Mean)
         cla(axPsych);
         completedTrials = find(~isnan(BpodSystem.Data.Custom.ChoiceLeft(1:currentTrial)));
         
         if ~isempty(completedTrials)
             trialAlphas = BpodSystem.Data.Custom.AssignedAlpha(completedTrials);
+            trialTypesCompleted = trialTypes(completedTrials);
             trialCorrect = (BpodSystem.Data.Custom.Outcomes(completedTrials) == 1); 
             
-            edges = 1.0:0.5:5.5; 
-            binCenters = edges(1:end-1) + 0.25;
+            % Reconstruct the matching Betas
+            trialBetas = ones(size(trialAlphas)); 
+            trialBetas(trialTypesCompleted == 1) = S.GUI.BetaLeft; 
+            trialBetas(trialTypesCompleted == 2) = S.GUI.BetaRight; 
+            
+            % Calculate the true mean (mu) for every trial
+            trialMeans = trialAlphas ./ (trialAlphas + trialBetas);
+            
+            % Define bins across the unified 0.0 to 1.0 probability space
+            edges = 0.0:0.1:1.0; 
+            binCenters = edges(1:end-1) + 0.05;
             accByBin = NaN(1, length(binCenters));
             
             for b = 1:length(binCenters)
-                inBin = (trialAlphas >= edges(b)) & (trialAlphas < edges(b+1));
+                inBin = (trialMeans >= edges(b)) & (trialMeans < edges(b+1));
                 if sum(inBin) > 0
                     accByBin(b) = sum(trialCorrect(inBin)) / sum(inBin) * 100;
                 end
             end
             
             plot(axPsych, binCenters, accByBin, '-ko', 'LineWidth', 1.5, 'MarkerFaceColor', 'k');
-            xline(axPsych, 3.0, 'r--', 'Ambiguous');
+            xline(axPsych, 0.5, 'r--', 'Ambiguous'); % The true center is exactly 0.5
         end
     end
     
     HandlePauseCondition;
-    if BpodSystem.Status.BeingUsed == 0; return; end 
+    if BpodSystem.Status.BeingUsed == 0
+        % Save the custom metrics figure when the session ends
+        [SessionPath, SessionName, ~] = fileparts(BpodSystem.Path.CurrentDataFile);
+        
+        % Save a quick-view PNG and an editable MATLAB .fig file
+        saveas(MetricsFig, fullfile(SessionPath, [SessionName, '_Metrics.png']));
+        savefig(MetricsFig, fullfile(SessionPath, [SessionName, '_Metrics.fig']));
+        
+        return; 
+    end 
 end
 
 %% State Machine Assembly
@@ -212,8 +231,8 @@ ErrorTrigger = (BankSize * 2);
 sma = NewStateMachine();
 
 sma = AddState(sma, 'Name', 'WaitForCenterPoke', ...
-    'Timer', 60,...
-    'StateChangeConditions', {'Port2In', 'PlayStimulus', 'Tup', 'NoTrialStart'},...
+    'Timer', 0,...
+    'StateChangeConditions', {'Port2In', 'PlayStimulus'},...
     'OutputActions', {'PWM2', 255}); 
 
 sma = AddState(sma, 'Name', 'PlayStimulus', ...
