@@ -21,8 +21,8 @@ if isempty(fieldnames(S))
     S.GUI.EarlyWithdrawalDelay = 1; % s (Timeout for breaking fixation)
     
     % Beta Distribution Parameters for Difficulty Generation
-    S.GUI.TaskDiffAlpha = 0.5; % 0.5 = U-Curve, 1.0 = Flat
-    S.GUI.TaskDiffBeta = 0.5;  % 0.5 = U-Curve, 1.0 = Flat
+    S.GUI.TaskDiffAlpha = 0.7; % 0.5 = U-Curve, 1.0 = Flat
+    S.GUI.TaskDiffBeta = 0.7;  % 0.5 = U-Curve, 1.0 = Flat
     
     S.GUIPanels.Difficulty = {'TaskDiffAlpha', 'TaskDiffBeta'};
     S.GUIPanels.Time = {'CueDelay', 'SoundDuration', 'CenterGrace', 'ResponseTime', 'ErrorDelay', 'EarlyWithdrawalDelay'};
