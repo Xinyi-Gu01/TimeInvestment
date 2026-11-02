@@ -148,7 +148,8 @@ for currentTrial = 1:maxTrials
         
         % Update Custom Metrics Figure
         %sgtitle(MetricsFig, ['Total Reward Consumed: ', num2str(TotalRewardAmount), ' uL'], 'FontWeight', 'bold', 'FontSize', 14);
-       
+        
+        Outs = BpodSystem.Data.Custom.Outcomes(1:currentTrial);
         
         nRew = sum(Outs == 1);
         nNoTrv = sum(Outs == 5);
@@ -166,7 +167,7 @@ for currentTrial = 1:maxTrials
         histogram(axMove, ValidMTs(~isnan(ValidMTs)), 'BinWidth', 0.25, 'FaceColor', [0.2 0.6 0.8]);
         
         cla(axErr);
-        Outs = BpodSystem.Data.Custom.Outcomes(1:currentTrial);
+        %Outs = BpodSystem.Data.Custom.Outcomes(1:currentTrial);
         bar(axErr, 1:5, [sum(Outs==1), sum(Outs==2), sum(Outs==3), sum(Outs==4), sum(Outs==5)], 'FaceColor', [0.5 0.5 0.5]);
         
         cla(axBias);
