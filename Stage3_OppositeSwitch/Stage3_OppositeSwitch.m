@@ -113,6 +113,8 @@ for currentTrial = 1:maxTrials
     SendStateMachine(sma);
     
     RawEvents = RunStateMachine;
+    if BpodSystem.Status.BeingUsed == 0; return; end
+
     if ~isempty(fieldnames(RawEvents))
         BpodSystem.Data = AddTrialEvents(BpodSystem.Data,RawEvents); 
         States = BpodSystem.Data.RawEvents.Trial{currentTrial}.States;
@@ -130,11 +132,16 @@ for currentTrial = 1:maxTrials
             BpodSystem.Data.Custom.Outcomes(currentTrial) = 4;
         elseif isfield(States, 'NoTravel') && ~isnan(States.NoTravel(1))
             BpodSystem.Data.Custom.Outcomes(currentTrial) = 5;
-            % Note: The rat made a correct initial choice before failing to travel:
-            BpodSystem.Data.Custom.ChoiceLeft(currentTrial) = (trialTypes(currentTrial) == 1);
+            if ~isnan(States.WaitForTravel(1))
+                % Chose correctly: Left trial -> Chose Left (1); Right trial -> Chose Right (0)
+                BpodSystem.Data.Custom.ChoiceLeft(currentTrial) = double(trialTypes(currentTrial) == 1);
+            elseif ~isnan(States.WaitForErrorTravel(1))
+                % Chose incorrectly: Left trial -> Chose Right (0); Right trial -> Chose Left (1)
+                BpodSystem.Data.Custom.ChoiceLeft(currentTrial) = double(trialTypes(currentTrial) == 2);
+            end
         end
         
-        if ~isnan(States.WaitForChoice(1,1)) && (~isnan(States.Reward(1)) || ~isnan(States.Punish(1)))
+        if ~isnan(States.WaitForChoice(1,1)) && (~isnan(States.Reward(1)) || ~isnan(States.Punish(1)) || (isfield(States, 'NoTravel') && ~isnan(States.NoTravel(1))))
             BpodSystem.Data.Custom.MoveTimes(currentTrial) = States.WaitForChoice(1,2) - States.WaitForChoice(1,1);
         end
         
@@ -148,12 +155,11 @@ for currentTrial = 1:maxTrials
         
         % Update Custom Metrics Figure
         %sgtitle(MetricsFig, ['Total Reward Consumed: ', num2str(TotalRewardAmount), ' uL'], 'FontWeight', 'bold', 'FontSize', 14);
-        
+       
         Outs = BpodSystem.Data.Custom.Outcomes(1:currentTrial);
-        
-        nRew = sum(Outs == 1);
+        nSwitched = sum(Outs == 1 | Outs == 2);
         nNoTrv = sum(Outs == 5);
-        travelRate = (nRew / max(1, (nRew + nNoTrv))) * 100;
+        travelRate = (nSwitched / max(1, (nSwitched + nNoTrv))) * 100;
 
         sgtitle(MetricsFig, sprintf('Trial: %d | Reward: %d uL | Travel Success: %.1f%%', ...
          currentTrial, TotalRewardAmount, travelRate), ...
@@ -167,14 +173,14 @@ for currentTrial = 1:maxTrials
         histogram(axMove, ValidMTs(~isnan(ValidMTs)), 'BinWidth', 0.25, 'FaceColor', [0.2 0.6 0.8]);
         
         cla(axErr);
-        %Outs = BpodSystem.Data.Custom.Outcomes(1:currentTrial);
+        
         bar(axErr, 1:5, [sum(Outs==1), sum(Outs==2), sum(Outs==3), sum(Outs==4), sum(Outs==5)], 'FaceColor', [0.5 0.5 0.5]);
         
         cla(axBias);
         LeftTrials = find(trialTypes(1:currentTrial) == 1 & ~isnan(BpodSystem.Data.Custom.ChoiceLeft(1:currentTrial)));
         RightTrials = find(trialTypes(1:currentTrial) == 2 & ~isnan(BpodSystem.Data.Custom.ChoiceLeft(1:currentTrial)));
-        LeftAcc = sum(BpodSystem.Data.Custom.ChoiceLeft(LeftTrials) == 1) / length(LeftTrials) * 100;
-        RightAcc = sum(BpodSystem.Data.Custom.ChoiceLeft(RightTrials) == 0) / length(RightTrials) * 100;
+        LeftAcc = sum(BpodSystem.Data.Custom.ChoiceLeft(LeftTrials) == 1) / max(1, length(LeftTrials)) * 100;
+        RightAcc = sum(BpodSystem.Data.Custom.ChoiceLeft(RightTrials) == 0) / max(1, length(RightTrials)) * 100;
         bar(axBias, 1, LeftAcc, 'FaceColor', PokeColors.L);
         bar(axBias, 2, RightAcc, 'FaceColor', PokeColors.R);
 
@@ -190,8 +196,12 @@ for currentTrial = 1:maxTrials
             binCenters = edges(1:end-1) + 0.05;
             pctRightByBin = NaN(1, length(binCenters));
             
-            for b = 1:length(binCenters)
-                inBin = (tProbs >= edges(b)) & (tProbs < edges(b+1));
+           for b = 1:length(binCenters)
+                if b == length(binCenters)
+                    inBin = (tProbs >= edges(b)) & (tProbs <= edges(b+1));
+                else
+                    inBin = (tProbs >= edges(b)) & (tProbs < edges(b+1));
+                end
                 if sum(inBin) > 0
                     pctRightByBin(b) = sum(tChoseRight(inBin)) / sum(inBin) * 100;
                 end
@@ -221,20 +231,26 @@ end
 %% State Machine Assembly
 function sma = PrepareStateMachine(S, TrialType, LeftValveTime, RightValveTime)
 
-if TrialType == 1 % LEFT TRIAL (Chosen: Left -> Reward drops at: Right)
+if TrialType == 1 % LEFT TRIAL (Correct choice: Port 1 -> Reward at Port 3; Error choice: Port 3 -> Punish at Port 1)
     CorrectPortIn = 'Port1In';
-    ErrorPortIn = 'Port3In';
-    OppositePortIn = 'Port3In';
-    OppositeLED = {'PWM3', 255};
+    OppositeRewardPortIn = 'Port3In';
+    OppositeRewardLED = {'PWM3', 255};
     RewValve = {'ValveState', 4}; % Right valve
     RewardTime = RightValveTime;
-else              % RIGHT TRIAL (Chosen: Right -> Reward drops at: Left)
+    
+    ErrorPortIn = 'Port3In';
+    OppositeErrorPortIn = 'Port1In';
+    OppositeErrorLED = {'PWM1', 255};
+else              % RIGHT TRIAL (Correct choice: Port 3 -> Reward at Port 1; Error choice: Port 1 -> Punish at Port 3)
     CorrectPortIn = 'Port3In';
-    ErrorPortIn = 'Port1In';
-    OppositePortIn = 'Port1In';
-    OppositeLED = {'PWM1', 255};
+    OppositeRewardPortIn = 'Port1In';
+    OppositeRewardLED = {'PWM1', 255};
     RewValve = {'ValveState', 1}; % Left valve
     RewardTime = LeftValveTime;
+    
+    ErrorPortIn = 'Port1In';
+    OppositeErrorPortIn = 'Port3In';
+    OppositeErrorLED = {'PWM3', 255};
 end
 
 sma = NewStateMachine();
@@ -259,16 +275,24 @@ sma = AddState(sma, 'Name', 'CenterGrace', ...
     'StateChangeConditions', {'Port2In', '>back', 'Tup', 'EarlyWithdrawal'}, ...
     'OutputActions', {});
 
+% Initial Choice: Both ports lit
 sma = AddState(sma, 'Name', 'WaitForChoice', ...
     'Timer', S.GUI.ResponseTime,...
-    'StateChangeConditions', {CorrectPortIn, 'WaitForTravel', ErrorPortIn, 'Punish', 'Tup', 'NoDecision'},...
+    'StateChangeConditions', {CorrectPortIn, 'WaitForTravel', ErrorPortIn, 'WaitForErrorTravel', 'Tup', 'NoDecision'},...
     'OutputActions', {'PWM1', 255, 'PWM3', 255});
 
-% NEW: Opposite LED turns on; wait for rat to cross over and poke
+% Correct Choice -> Wait for travel to opposite port for Reward
 sma = AddState(sma, 'Name', 'WaitForTravel', ...
     'Timer', S.GUI.ResponseTime,...
-    'StateChangeConditions', {OppositePortIn, 'Reward', 'Tup', 'NoTravel'},...
-    'OutputActions', OppositeLED);
+    'StateChangeConditions', {OppositeRewardPortIn, 'Reward', 'Tup', 'NoTravel'},...
+    'OutputActions', OppositeRewardLED);
+
+% Error Choice -> Wait for travel to opposite port for Punish
+sma = AddState(sma, 'Name', 'WaitForErrorTravel', ...
+    'Timer', S.GUI.ResponseTime,...
+    'StateChangeConditions', {OppositeErrorPortIn, 'Punish', 'Tup', 'NoTravel'},...
+    'OutputActions', OppositeErrorLED);
+
 
 sma = AddState(sma, 'Name', 'Reward', ...
     'Timer', RewardTime,...
@@ -277,27 +301,27 @@ sma = AddState(sma, 'Name', 'Reward', ...
 
 sma = AddState(sma, 'Name', 'Drinking', ...
     'Timer', 2,...
-    'StateChangeConditions', {'Tup', 'exit'},...
+    'StateChangeConditions', {'Tup', '>exit'},...
     'OutputActions', {});
 
 sma = AddState(sma, 'Name', 'Punish', ...
     'Timer', S.GUI.ErrorDelay,...
-    'StateChangeConditions', {'Tup', 'exit'},...
+    'StateChangeConditions', {'Tup', '>exit'},...
     'OutputActions', {'HiFi1', ['P' 1]}); 
 
 sma = AddState(sma, 'Name', 'EarlyWithdrawal', ...
     'Timer', S.GUI.EarlyWithdrawalDelay, ...
-    'StateChangeConditions', {'Tup', 'exit'}, ...
+    'StateChangeConditions', {'Tup', '>exit'}, ...
     'OutputActions', {'HiFi1', ['P' 1]}); % Play Error Sound 
 
 sma = AddState(sma, 'Name', 'NoDecision', ...
     'Timer', 1,...
-    'StateChangeConditions', {'Tup', 'exit'},...
+    'StateChangeConditions', {'Tup', '>exit'},...
     'OutputActions', {'PWM1', 0, 'PWM2', 0, 'PWM3', 0});
 
 sma = AddState(sma, 'Name', 'NoTravel', ...
     'Timer', 1,...
-    'StateChangeConditions', {'Tup', 'exit'},...
+    'StateChangeConditions', {'Tup', '>exit'},...
     'OutputActions', {'PWM1', 0, 'PWM2', 0, 'PWM3', 0});
 
 %% Plotting Helpers
@@ -309,6 +333,7 @@ state_colors = struct( ...
     'CenterGrace', 0.5*[1 1 1],...
     'WaitForChoice',[0.5 1 1],...
     'WaitForTravel', [0.2 0.8 0.8], ...
+    'WaitForErrorTravel', [0.8 0.4 0.4], ... % Added
     'Reward', [0, 1, 0], ...
     'Drinking', [0, 0.8, 0], ...
     'Punish', [1, 0, 0], ...
