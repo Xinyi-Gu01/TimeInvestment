@@ -4,8 +4,11 @@ function Waveform = GenerateCategoricalCloud(sf, Duration, HighToneProb)
     % HighToneProb: Proportion of pips that will be sampled from the High Band (0.0 to 1.0)
     
     % 1. Define distinct frequency bands
-    lowMin = 2000;  lowMax = 6000;
-    highMin = 10000; highMax = 16000;
+    lowMin = 2000;  lowMax = 4000;
+    highMin = 8000; highMax = 16000;
+
+    lowPool  = logspace(log10(lowMin),  log10(lowMax),  6);
+    highPool = logspace(log10(highMin), log10(highMax), 6);
     
     % 2. Define temporal parameters
     pipDuration = 0.030; % 30 ms pips
@@ -28,11 +31,11 @@ function Waveform = GenerateCategoricalCloud(sf, Duration, HighToneProb)
     for i = 1:numPips
         % Determine if this specific pip belongs to the High or Low category
         if rand() < HighToneProb
-            % Sample uniformly from the High Band [10kHz - 16kHz]
-            currentFreq = highMin + rand() * (highMax - highMin);
+            % Sample log-uniformly from the High Band [8kHz - 16kHz]
+            currentFreq = highPool(randi(length(highPool)));
         else
-            % Sample uniformly from the Low Band [2kHz - 6kHz]
-            currentFreq = lowMin + rand() * (lowMax - lowMin);
+            % Sample log-uniformly from the Low Band [2kHz - 4kHz]
+            currentFreq = lowPool(randi(length(lowPool)));
         end
         
         % Generate the pure tone pip
