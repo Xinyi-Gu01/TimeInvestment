@@ -111,16 +111,25 @@ for currentTrial = 1:maxTrials
             disp('*** Moderate Right Bias (>70%) detected: Right reward reduced to 15 uL ***');
         end
         
-        % ANTI-BIAS TRIAL SKEWING:
-        % If bias > 75%, gently skew upcoming trial probabilities toward the neglected side
+        % Probabilistic Anti-Bias Trial Skewing (80% neglected side, 20% preferred side)
         if leftChoiceRatio > 0.75 && currentTrial < maxTrials
-            % Rat is Left-biased -> Force Right trials (High tone prob >= 0.5)
-            trialProbs(currentTrial) = 0.6 + rand() * 0.2; 
+            if rand() < 0.80
+                % 80% chance: Force Right trial (full 30 uL available on Right)
+                trialProbs(currentTrial) = 0.6 + rand() * 0.2;
+            else
+                % 20% chance: Allow Left trial (rat experiences reduced 5 or 15 uL on Left)
+                trialProbs(currentTrial) = 0.2 + rand() * 0.2;
+            end
             trialTypes(currentTrial) = (trialProbs(currentTrial) >= 0.5) + 1;
             
         elseif leftChoiceRatio < 0.25 && currentTrial < maxTrials
-            % Rat is Right-biased -> Force Left trials (High tone prob < 0.5)
-            trialProbs(currentTrial) = 0.2 + rand() * 0.2; 
+            if rand() < 0.80
+                % 80% chance: Force Left trial (full 30 uL available on Left)
+                trialProbs(currentTrial) = 0.2 + rand() * 0.2;
+            else
+                % 20% chance: Allow Right trial (rat experiences reduced 5 or 15 uL on Right)
+                trialProbs(currentTrial) = 0.6 + rand() * 0.2;
+            end
             trialTypes(currentTrial) = (trialProbs(currentTrial) >= 0.5) + 1;
         end
     end
