@@ -114,10 +114,13 @@ for currentTrial = 1:maxTrials
         % ANTI-BIAS TRIAL SKEWING:
         % If bias > 75%, gently skew upcoming trial probabilities toward the neglected side
         if leftChoiceRatio > 0.75 && currentTrial < maxTrials
-            trialProbs(currentTrial) = 0.2 + rand() * 0.2; % Force more Right trials (low highToneProb)
+            % Rat is Left-biased -> Force Right trials (High tone prob >= 0.5)
+            trialProbs(currentTrial) = 0.6 + rand() * 0.2; 
             trialTypes(currentTrial) = (trialProbs(currentTrial) >= 0.5) + 1;
+            
         elseif leftChoiceRatio < 0.25 && currentTrial < maxTrials
-            trialProbs(currentTrial) = 0.6 + rand() * 0.2; % Force more Left trials (high highToneProb)
+            % Rat is Right-biased -> Force Left trials (High tone prob < 0.5)
+            trialProbs(currentTrial) = 0.2 + rand() * 0.2; 
             trialTypes(currentTrial) = (trialProbs(currentTrial) >= 0.5) + 1;
         end
     end
