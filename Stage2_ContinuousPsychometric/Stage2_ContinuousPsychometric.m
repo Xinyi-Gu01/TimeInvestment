@@ -22,8 +22,8 @@ if isempty(fieldnames(S))
     S.GUI.EarlyWithdrawalDelay = 1; % s (Timeout for breaking fixation)
     
     % Beta Distribution Parameters for Difficulty Generation
-    S.GUI.TaskDiffAlpha = 0.5; % 0.5 = U-Curve, 1.0 = Flat
-    S.GUI.TaskDiffBeta = 0.5;  % 0.5 = U-Curve, 1.0 = Flat
+    S.GUI.TaskDiffAlpha = 0.8; % 0.5 = U-Curve, 1.0 = Flat
+    S.GUI.TaskDiffBeta = 0.8;  % 0.5 = U-Curve, 1.0 = Flat
     
     S.GUIPanels.Difficulty = {'TaskDiffAlpha', 'TaskDiffBeta'};
     S.GUIPanels.Time = {'CueDelay', 'SoundDuration', 'CenterGrace', 'ResponseTime', 'OutcomeDelay','ErrorDelay', 'EarlyWithdrawalDelay'};
@@ -81,10 +81,52 @@ H.AMenvelope = 1/(sf*0.001):1/(sf*0.001):1;
 %% Main Trial Loop
 for currentTrial = 1:maxTrials
     S = BpodParameterGUI('sync', S);
- 
+    %% --- DYNAMIC SIDE BIAS & REWARD SCALING ---
+    % Default target volumes
+    leftRewardVol = S.GUI.RewardVolume;
+    rightRewardVol = S.GUI.RewardVolume;
     
-    LeftValveTime = GetValveTimes(S.GUI.RewardVolume, 1); 
-    RightValveTime = GetValveTimes(S.GUI.RewardVolume, 3);
+    % Calculate rolling bias over the last 20 completed choices
+    completedChoices = BpodSystem.Data.Custom.ChoiceLeft(1:max(1, currentTrial-1));
+    validChoices = completedChoices(~isnan(completedChoices));
+    
+    if length(validChoices) >= 15
+        recentWindow = validChoices(max(1, end-19):end);
+        leftChoiceRatio = mean(recentWindow == 1); % Fraction of Left choices (0.0 to 1.0)
+        
+        % Check Left Bias (Rat is over-choosing Left)
+        if leftChoiceRatio >= 0.80
+            leftRewardVol = 5;  % Severe penalty for heavy bias
+            disp('*** Heavy Left Bias (>80%) detected: Left reward reduced to 5 uL ***');
+        elseif leftChoiceRatio >= 0.70
+            leftRewardVol = 15; % Moderate penalty
+            disp('*** Moderate Left Bias (>70%) detected: Left reward reduced to 15 uL ***');
+        
+        % Check Right Bias (Rat is over-choosing Right, meaning leftChoiceRatio <= 0.20 or 0.30)
+        elseif leftChoiceRatio <= 0.20
+            rightRewardVol = 5; 
+            disp('*** Heavy Right Bias (>80%) detected: Right reward reduced to 5 uL ***');
+        elseif leftChoiceRatio <= 0.30
+            rightRewardVol = 15;
+            disp('*** Moderate Right Bias (>70%) detected: Right reward reduced to 15 uL ***');
+        end
+        
+        % ANTI-BIAS TRIAL SKEWING:
+        % If bias > 75%, gently skew upcoming trial probabilities toward the neglected side
+        if leftChoiceRatio > 0.75 && currentTrial < maxTrials
+            trialProbs(currentTrial) = 0.2 + rand() * 0.2; % Force more Right trials (low highToneProb)
+            trialTypes(currentTrial) = (trialProbs(currentTrial) >= 0.5) + 1;
+        elseif leftChoiceRatio < 0.25 && currentTrial < maxTrials
+            trialProbs(currentTrial) = 0.6 + rand() * 0.2; % Force more Left trials (high highToneProb)
+            trialTypes(currentTrial) = (trialProbs(currentTrial) >= 0.5) + 1;
+        end
+    end
+
+    % Compute valve times using the dynamically adjusted side-specific volumes
+    LeftValveTime = GetValveTimes(leftRewardVol, 1); 
+    RightValveTime = GetValveTimes(rightRewardVol, 3);
+    
+   
     
     % 1. DYNAMIC DIFFICULTY GENERATION (Only triggers if GUI is changed)
     if S.GUI.TaskDiffAlpha ~= LastTaskDiffAlpha || S.GUI.TaskDiffBeta ~= LastTaskDiffBeta
@@ -119,7 +161,13 @@ for currentTrial = 1:maxTrials
         
         if ~isnan(States.Reward(1))
             BpodSystem.Data.Custom.Outcomes(currentTrial) = 1;
-            TotalRewardAmount = TotalRewardAmount + S.GUI.RewardVolume;
+            % Determine which side was rewarded on this trial
+            if trialTypes(currentTrial) == 1
+                trialDeliveredVol = leftRewardVol;
+            else
+                trialDeliveredVol = rightRewardVol;
+            end
+            TotalRewardAmount = TotalRewardAmount + trialDeliveredVol;
             BpodSystem.Data.Custom.ChoiceLeft(currentTrial) = (trialTypes(currentTrial) == 1); 
         elseif ~isnan(States.Punish(1))
             BpodSystem.Data.Custom.Outcomes(currentTrial) = 2;
@@ -143,7 +191,8 @@ for currentTrial = 1:maxTrials
         SaveBpodSessionData;
         
         % Update Custom Metrics Figure
-        sgtitle(MetricsFig, ['Total Reward Consumed: ', num2str(TotalRewardAmount), ' uL'], 'FontWeight', 'bold', 'FontSize', 14);
+        sgtitle(MetricsFig, sprintf('Trial: %d | Total Reward Consumed: %.1f uL', currentTrial, TotalRewardAmount), ...
+    'FontWeight', 'bold', 'FontSize', 14);
         
         TimeMin = (BpodSystem.Data.TrialStartTimestamp - BpodSystem.Data.TrialStartTimestamp(1)) / 60;
         plot(axRate, TimeMin, 1:currentTrial, 'k-', 'LineWidth', 1.5);
@@ -156,13 +205,24 @@ for currentTrial = 1:maxTrials
         Outs = BpodSystem.Data.Custom.Outcomes(1:currentTrial);
         bar(axErr, 1:4, [sum(Outs==1), sum(Outs==2), sum(Outs==3), sum(Outs==4)], 'FaceColor', [0.5 0.5 0.5]);
         
+        %panel 4
+
         cla(axBias);
         LeftTrials = find(trialTypes(1:currentTrial) == 1 & ~isnan(BpodSystem.Data.Custom.ChoiceLeft(1:currentTrial)));
         RightTrials = find(trialTypes(1:currentTrial) == 2 & ~isnan(BpodSystem.Data.Custom.ChoiceLeft(1:currentTrial)));
         LeftAcc = sum(BpodSystem.Data.Custom.ChoiceLeft(LeftTrials) == 1) / max(1, length(LeftTrials)) * 100;
         RightAcc = sum(BpodSystem.Data.Custom.ChoiceLeft(RightTrials) == 0) / max(1, length(RightTrials)) * 100;
-        bar(axBias, 1, LeftAcc, 'FaceColor', PokeColors.L);
-        bar(axBias, 2, RightAcc, 'FaceColor', PokeColors.R);
+        
+        % Plot bars with custom colors
+        b = bar(axBias, [1, 2], [LeftAcc, RightAcc]);
+        b.FaceColor = 'flat';
+        b.CData(1,:) = PokeColors.L;
+        b.CData(2,:) = PokeColors.R;
+        set(axBias, 'XTick', 1:2, 'XTickLabel', {'Left', 'Right'}, 'YLim', [0 110]);
+        
+        % Overlay numeric text labels on top of each bar
+        text(axBias, 1, LeftAcc + 5, sprintf('%.1f%%', LeftAcc), 'HorizontalAlignment', 'center', 'FontWeight', 'bold', 'FontSize', 10);
+        text(axBias, 2, RightAcc + 5, sprintf('%.1f%%', RightAcc), 'HorizontalAlignment', 'center', 'FontWeight', 'bold', 'FontSize', 10);
 
        % 5. Live Psychometric Curve (Plotting % Rightward Choices)
         cla(axPsych);
