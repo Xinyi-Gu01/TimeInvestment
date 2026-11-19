@@ -9,6 +9,7 @@ H = BpodHiFi(BpodSystem.ModuleUSB.HiFi1);
 %% Define Parameters
 S = BpodSystem.ProtocolSettings; 
 if isempty(fieldnames(S))  
+    S.GUI.SoundAttenuation_dB = -3;
     S.GUI.RewardVolume = 30; % uL
     S.GUI.SoundDuration = 0.5; % s
     
@@ -24,7 +25,8 @@ if isempty(fieldnames(S))
     % Beta Distribution Parameters for Difficulty Generation
     S.GUI.TaskDiffAlpha = 0.8; % 0.5 = U-Curve, 1.0 = Flat
     S.GUI.TaskDiffBeta = 0.8;  % 0.5 = U-Curve, 1.0 = Flat
-    
+
+    S.GUIPanels.Sound = {'SoundAttenuation_dB', 'SoundDuration'};
     S.GUIPanels.Difficulty = {'TaskDiffAlpha', 'TaskDiffBeta'};
     S.GUIPanels.Time = {'CueDelay', 'SoundDuration', 'CenterGrace', 'ResponseTime', 'OutcomeDelay','ErrorDelay', 'EarlyWithdrawalDelay'};
 end
@@ -69,9 +71,13 @@ xlabel(axPsych, 'Proportion of High Tones'); ylabel(axPsych, '% Rightward Choice
 set(axPsych, 'YLim', [0 100], 'XLim', [0 1]);
 
 %% Pre-Load Static Error Sound (192kHz)
+
 sf = 192000; 
 H.SamplingRate = sf;
-H.HeadphoneAmpEnabled = false; 
+H.HeadphoneAmpEnabled = true; 
+H.HeadphoneAmpGain = 10; % Range: 0 to 63 (start conservatively around 10-20)
+H.DigitalAttenuation_dB = S.GUI.SoundAttenuation_dB;
+H.SynthAmplitude = 0; % Ensure background synth doesn't add noise
 
 errorSound = GenerateWhiteNoise(sf, S.GUI.ErrorDelay, 1, 2);
 H.load(2, errorSound); % Load Error sound permanently to Slot 2
@@ -81,6 +87,7 @@ H.AMenvelope = 1/(sf*0.001):1/(sf*0.001):1;
 %% Main Trial Loop
 for currentTrial = 1:maxTrials
     S = BpodParameterGUI('sync', S);
+    H.DigitalAttenuation_dB = S.GUI.SoundAttenuation_dB;
     %% --- DYNAMIC SIDE BIAS & REWARD SCALING ---
     % Default target volumes
     leftRewardVol = S.GUI.RewardVolume;
@@ -206,6 +213,7 @@ for currentTrial = 1:maxTrials
         sgtitle(MetricsFig, sprintf('Trial: %d | Total Reward Consumed: %.1f uL', currentTrial, TotalRewardAmount), ...
     'FontWeight', 'bold', 'FontSize', 14);
         
+        cla(axRate)
         TimeMin = (BpodSystem.Data.TrialStartTimestamp - BpodSystem.Data.TrialStartTimestamp(1)) / 60;
         plot(axRate, TimeMin, 1:currentTrial, 'k-', 'LineWidth', 1.5);
         
@@ -337,22 +345,22 @@ sma = AddState(sma, 'Name', 'Reward', ...
 
 sma = AddState(sma, 'Name', 'Drinking', ...
     'Timer', 2,...
-    'StateChangeConditions', {'Tup', 'exit'},...
+    'StateChangeConditions', {'Tup', '>exit'},...
     'OutputActions', {});
 
 sma = AddState(sma, 'Name', 'Punish', ...
     'Timer', S.GUI.ErrorDelay,...
-    'StateChangeConditions', {'Tup', 'exit'},...
+    'StateChangeConditions', {'Tup', '>exit'},...
     'OutputActions', {'HiFi1', ['P' 1]}); 
 
 sma = AddState(sma, 'Name', 'EarlyWithdrawal', ...
     'Timer', S.GUI.EarlyWithdrawalDelay, ...
-    'StateChangeConditions', {'Tup', 'exit'}, ...
+    'StateChangeConditions', {'Tup', '>exit'}, ...
     'OutputActions', {'HiFi1', ['P' 1]}); % Play Error Sound 
 
 sma = AddState(sma, 'Name', 'NoDecision', ...
     'Timer', 1,...
-    'StateChangeConditions', {'Tup', 'exit'},...
+    'StateChangeConditions', {'Tup', '>exit'},...
     'OutputActions', {});
 
 %% Plotting Helpers
