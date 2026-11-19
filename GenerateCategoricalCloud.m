@@ -11,8 +11,8 @@ function Waveform = GenerateCategoricalCloud(sf, Duration, HighToneProb)
     highPool = logspace(log10(highMin), log10(highMax), 6);
     
     % 2. Define temporal parameters
-    pipDuration = 0.030; % 30 ms pips
-    pipInterval = 0.010; % 10 ms between onsets (100 Hz rate)
+    pipDuration = 0.025; % 30 ms pips
+    pipInterval = 0.020; % 10 ms between onsets (100 Hz rate)
     numPips = floor((Duration - pipDuration) / pipInterval) + 1;
     
     % Initialize the total waveform buffer
